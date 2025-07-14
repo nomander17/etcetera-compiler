@@ -230,4 +230,52 @@ mod tests {
             assert_eq!(lexer.next_token(), token);
         }
     }
+
+    #[test]
+    fn test_if_statement() {
+        let input = "if a > b then print \"$a is greater than b\" end if";
+        let mut lexer = Lexer::new(input);
+
+        let tokens = vec![
+            Token::If,
+            Token::Identifier("a".to_string()),
+            Token::GreaterThan,
+            Token::Identifier("b".to_string()),
+            Token::Then,
+            Token::Print,
+            Token::String("$a is greater than b".to_string()),
+            Token::End,
+            Token::If,
+        ];
+
+        for token in tokens {
+            assert_eq!(lexer.next_token(), token);
+        }
+    }
+
+    #[test]
+    fn test_loop_statement() {
+        let input = "loop from 1 to 10 in i\nprint i\nend loop";
+        let mut lexer = Lexer::new(input);
+
+        let tokens = vec![
+            Token::Loop,
+            Token::From,
+            Token::Int(1),
+            Token::To,
+            Token::Int(10),
+            Token::In,
+            Token::Identifier("i".to_string()),
+            Token::Newline,
+            Token::Print,
+            Token::Identifier("i".to_string()),
+            Token::Newline,
+            Token::End,
+            Token::Loop,
+        ];
+
+        for token in tokens {
+            assert_eq!(lexer.next_token(), token);
+        }
+    }
 }
