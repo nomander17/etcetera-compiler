@@ -21,11 +21,11 @@ pub enum Token {
     BoolType,
 
     // Literals
-    Int(i64),
-    Float(f64),
-    Char(char),
-    String(String),
-    Bool(bool),
+    IntLiteral(i64),
+    FloatLiteral(f64),
+    CharLiteral(char),
+    StringLiteral(String),
+    BoolLiteral(bool),
 
     // Identifier
     Identifier(String),

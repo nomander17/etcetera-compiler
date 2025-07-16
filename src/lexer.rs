@@ -93,8 +93,8 @@ impl<'a> Lexer<'a> {
                     "string" => Token::StringType,
                     "char" => Token::CharType,
                     "bool" => Token::BoolType,
-                    "true" => Token::Bool(true),
-                    "false" => Token::Bool(false),
+                    "true" => Token::BoolLiteral(true),
+                    "false" => Token::BoolLiteral(false),
                     "not" => Token::Not,
                     "and" => Token::And,
                     "or" => Token::Or,
@@ -178,10 +178,10 @@ impl<'a> Lexer<'a> {
                 self.read_char();
             }
             let number = &self.input[position..self.position];
-            return Token::Float(number.parse().unwrap());
+            return Token::FloatLiteral(number.parse().unwrap());
         }
         let number = &self.input[position..self.position];
-        return Token::Int(number.parse().unwrap());
+        return Token::IntLiteral(number.parse().unwrap());
     }
 
     fn read_string(&mut self) -> Token {
@@ -193,14 +193,14 @@ impl<'a> Lexer<'a> {
             }
         }
         let s = self.input[position..self.position].to_string();
-        Token::String(s)
+        Token::StringLiteral(s)
     }
     fn read_char_literal(&mut self) -> Token {
         self.read_char(); // Consume opening '
         let ch = self.ch as char;
         self.read_char(); // Consume char
         if self.ch == b'\'' {
-            Token::Char(ch)
+            Token::CharLiteral(ch)
         } else {
             Token::Illegal
         }
@@ -222,7 +222,7 @@ mod tests {
             Token::Colon,
             Token::IntType,
             Token::Assign,
-            Token::Int(5),
+            Token::IntLiteral(5),
             Token::Eof,
         ];
 
@@ -243,7 +243,7 @@ mod tests {
             Token::Identifier("b".to_string()),
             Token::Then,
             Token::Print,
-            Token::String("$a is greater than b".to_string()),
+            Token::StringLiteral("$a is greater than b".to_string()),
             Token::End,
             Token::If,
         ];
@@ -261,9 +261,9 @@ mod tests {
         let tokens = vec![
             Token::Loop,
             Token::From,
-            Token::Int(1),
+            Token::IntLiteral(1),
             Token::To,
-            Token::Int(10),
+            Token::IntLiteral(10),
             Token::In,
             Token::Identifier("i".to_string()),
             Token::Newline,
