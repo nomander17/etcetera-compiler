@@ -157,10 +157,6 @@ impl<'a> Parser<'a> {
             return None;
         }
 
-        if self.current_token != Token::End {
-            return None;
-        }
-
         if !self.expect_peek(Token::If) {
             return None;
         }
@@ -258,6 +254,7 @@ impl<'a> Parser<'a> {
                 | Token::FloorDivide
                 | Token::Equal
                 | Token::NotEqual
+                | Token::GreaterThan
                 | Token::GreaterThanOrEqual
                 | Token::LessThan
                 | Token::LessThanOrEqual
@@ -343,7 +340,7 @@ mod tests {
     use crate::lexer::Lexer;
 
     #[test]
-    fn parser_test_let_statement() {
+    fn test_let_statement() {
         let input = "a: int = 5";
         let lexer = Lexer::new(input);
         let mut parser = Parser::new(lexer);
@@ -352,6 +349,45 @@ mod tests {
         assert_eq!(program.statements.len(), 1);
 
         let expected = Statement::Let("a".to_string(), Expression::IntLiteral(5));
+        assert_eq!(program.statements[0], expected);
+    }
+
+    #[test]
+    fn test_print_statement() {
+        let input = "print $a";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(program.statements.len(), 1);
+
+        let expected = Statement::Print(Expression::Identifer("$a".to_string()));
+        assert_eq!(program.statements[0], expected);
+    }
+
+    #[test]
+    fn test_if_statement() {
+        let input = "if 1 > 0 then\nprint 1\nend if";
+        let lexer = Lexer::new(input);
+        let mut lexer2 = lexer.clone();
+        for _ in 0..11 {
+            print!("{:?}\n", lexer2.next_token());
+        }
+
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(program.statements.len(), 1);
+
+        let expected = Statement::If(
+            Expression::Infix(
+                Box::new(Expression::IntLiteral(1)),
+                Token::GreaterThan,
+                Box::new(Expression::IntLiteral(0)),
+            ),
+            vec![Statement::Print(Expression::IntLiteral(1))], // do what if true
+            None,                                              // else
+        );
         assert_eq!(program.statements[0], expected);
     }
 }
