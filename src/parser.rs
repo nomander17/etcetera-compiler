@@ -369,11 +369,6 @@ mod tests {
     fn test_if_statement() {
         let input = "if 1 > 0 then\nprint 1\nend if";
         let lexer = Lexer::new(input);
-        let mut lexer2 = lexer.clone();
-        for _ in 0..11 {
-            print!("{:?}\n", lexer2.next_token());
-        }
-
         let mut parser = Parser::new(lexer);
         let program = parser.parse_program();
 
@@ -387,6 +382,63 @@ mod tests {
             ),
             vec![Statement::Print(Expression::IntLiteral(1))], // do what if true
             None,                                              // else
+        );
+        assert_eq!(program.statements[0], expected);
+    }
+
+    #[test]
+    fn test_infix_expression() {
+        let input = "a: int = 5 <= 10";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert_eq!(program.statements.len(), 1);
+
+        let expected = Statement::Let(
+            "a".to_string(),
+            Expression::Infix(
+                Box::new(Expression::IntLiteral(5)),
+                Token::LessThanOrEqual,
+                Box::new(Expression::IntLiteral(10)),
+            ),
+        );
+
+        assert_eq!(program.statements[0], expected)
+    }
+
+    #[test]
+    fn test_if_else_statement() {
+        let input = "if 1 > 0 then print 1 else print 0 end if";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        let expected = Statement::If(
+            Expression::Infix(
+                Box::new(Expression::IntLiteral(1)),
+                Token::GreaterThan,
+                Box::new(Expression::IntLiteral(0)),
+            ),
+            vec![Statement::Print(Expression::IntLiteral(1))],
+            Some(vec![Statement::Print(Expression::IntLiteral(0))]),
+        );
+
+        assert_eq!(program.statements[0], expected)
+    }
+
+    #[test]
+    fn test_loop_statement() {
+        let input = "loop from 1 to 10 in i\nprint $i\nend loop";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        let expected = Statement::Loop(
+            "i".to_string(),
+            Expression::IntLiteral(1),
+            Expression::IntLiteral(10),
+            vec![Statement::Print(Expression::Identifer("$i".to_string()))],
         );
         assert_eq!(program.statements[0], expected);
     }
