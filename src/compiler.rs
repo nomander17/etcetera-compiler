@@ -11,7 +11,13 @@ use crate::{
     token::Token,
 };
 
-#[derive(Debug, Clone)]
+enum TypeInfo {
+    Int,
+    Float,
+    Bool,
+}
+
+#[derive(Debug, Clone, Copy)]
 enum TypedValue<'ctx> {
     Int(IntValue<'ctx>),
     Float(FloatValue<'ctx>),
@@ -19,10 +25,10 @@ enum TypedValue<'ctx> {
 }
 
 pub struct Compiler<'ctx> {
-    context: &'ctx Context,                              // core
-    builder: Builder<'ctx>,                              // build llvm instructions
-    module: Module<'ctx>,                                // container; holds global vars and funs
-    variables: Vec<HashMap<String, PointerValue<'ctx>>>, // variable scope
+    context: &'ctx Context,                                          // core
+    builder: Builder<'ctx>,                                          // build llvm instructions
+    module: Module<'ctx>, // container; holds global vars and funs
+    variables: Vec<HashMap<String, (PointerValue<'ctx>, TypeInfo)>>, // variable scope
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -45,7 +51,7 @@ impl<'ctx> Compiler<'ctx> {
         self.variables.pop();
     }
 
-    fn get_variable(&self, name: &str) -> Option<&PointerValue<'ctx>> {
+    fn get_variable(&self, name: &str) -> Option<&(PointerValue<'ctx>, TypeInfo)> {
         for scope in self.variables.iter().rev() {
             if let Some(var) = scope.get(name) {
                 return Some(var);
@@ -54,8 +60,10 @@ impl<'ctx> Compiler<'ctx> {
         None
     }
 
-    fn insert_variable(&mut self, name: String, value: PointerValue<'ctx>) {
-        self.variables.last_mut().unwrap().insert(name, value);
+    fn insert_variable(&mut self, name: String, value: PointerValue<'ctx>, ty: TypeInfo) {
+        if let Some(scope) = self.variables.last_mut() {
+            scope.insert(name, (value, ty))
+        };
     }
 
     pub fn compile(&mut self, program: Program) -> Result<String, String> {
@@ -90,15 +98,15 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn compile_let_statement(&mut self, name: String, expr: Expression) -> Result<(), String> {
-        let value = self.compile_expression(expr)?;
+        let (value, ty) = self.compile_expression(expr)?;
         // allocate memory on stack for variable
-        let alloca = self.create_alloca_for_typed_value(&value, &name)?;
+        let alloca = self.create_alloca_for_type(ty, &name)?;
 
         // store value in allocated space
         self.store_typed_value(&value, alloca)?;
 
         // add reference to it in our symbol table
-        self.insert_variable(name, alloca);
+        self.insert_variable(name, alloca, ty);
         Ok(())
     }
 
@@ -107,35 +115,40 @@ impl<'ctx> Compiler<'ctx> {
         name: String,
         expr: Expression,
     ) -> Result<(), String> {
-        let value = self.compile_expression(expr)?;
+        let (value, ty) = self.compile_expression(expr)?;
 
-        if let Some(&var_ptr) = self.get_variable(&name) {
-            // Variable exists, update it
+        if let Some(&(var_ptr, var_ty)) = self.get_variable(&name) {
+            // variable exists, update it
+            // TODO promote type
+            if var_ty != ty {
+                return Err(format!(
+                    "Type mismtach on assignment to '{}': {:?} vs {:?}",
+                    name, var_ty, ty
+                ));
+            }
             self.store_typed_value(&value, var_ptr)?;
         } else {
-            // Variable doesn't exist, create new one
-            let alloca = self.create_alloca_for_typed_value(&value, &name)?;
+            // variable doesn't exist, create new one
+            let alloca = self.create_alloca_for_type(ty, &name);
             self.store_typed_value(&value, alloca)?;
-            self.insert_variable(name, alloca);
+            self.insert_variable(name, alloca, ty);
         }
         Ok(())
     }
 
-    /// Helper function to create alloca based on TypedValue
-    fn create_alloca_for_typed_value(
+    fn create_alloca_for_type(
         &self,
-        value: &TypedValue<'ctx>,
+        ty: TypeInfo,
         name: &str,
     ) -> Result<PointerValue<'ctx>, String> {
-        let alloca = match value {
-            TypedValue::Int(_) => self.builder.build_alloca(self.context.i32_type(), name),
-            TypedValue::Float(_) => self.builder.build_alloca(self.context.f64_type(), name),
-            TypedValue::Bool(_) => self.builder.build_alloca(self.context.bool_type(), name),
+        let alloca = match ty {
+            TypeInfo::Int => self.builder.build_alloca(self.context.i32_type(), name),
+            TypeInfo::Float => self.builder.build_alloca(self.context.f64_type(), name),
+            TypeInfo::Bool => self.builder.build_alloca(self.context.bool_type(), name),
         };
         alloca.map_err(|e| e.to_string())
     }
 
-    /// Helper function to store TypedValue into allocated memory
     fn store_typed_value(
         &self,
         value: &TypedValue<'ctx>,
@@ -152,7 +165,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    // Type promotion helper
     fn promote_to_common_type(
         &self,
         lhs: TypedValue<'ctx>,
@@ -183,7 +195,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    // Arithmetic operations
     fn build_add(
         &self,
         lhs: TypedValue<'ctx>,
@@ -267,7 +278,7 @@ impl<'ctx> Compiler<'ctx> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
-                // Convert integers to floats for division to get proper decimal results
+                // convert integers to floats for division to get proper decimal results
                 let l_float = self
                     .builder
                     .build_signed_int_to_float(l, self.context.f64_type(), "l_div_float")
@@ -328,7 +339,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    // Comparison operations
     fn build_gt(
         &self,
         lhs: TypedValue<'ctx>,
@@ -454,7 +464,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    // Logical operations
     fn build_and(
         &self,
         lhs: TypedValue<'ctx>,
@@ -483,7 +492,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(TypedValue::Bool(result))
     }
 
-    // Helper to convert any TypedValue to boolean
     fn convert_to_bool(&self, value: TypedValue<'ctx>) -> Result<IntValue<'ctx>, String> {
         match value {
             TypedValue::Bool(b) => Ok(b),
@@ -504,44 +512,66 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_expression(&mut self, expr: Expression) -> Result<TypedValue<'ctx>, String> {
+    fn compile_expression(
+        &mut self,
+        expr: Expression,
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         match expr {
             Expression::IntLiteral(val) => {
                 let value = self.context.i32_type().const_int(val as u64, false);
-                Ok(TypedValue::Int(value))
+                Ok((TypedValue::Int(value), TypeInfo::Int))
             }
             Expression::FloatLiteral(val) => {
                 let value = self.context.f64_type().const_float(val);
-                Ok(TypedValue::Float(value))
+                Ok((TypedValue::Float(value), TypeInfo::Float))
             }
             Expression::BoolLiteral(val) => {
                 let value = self.context.bool_type().const_int(val as u64, false);
-                Ok(TypedValue::Bool(value))
+                Ok((TypedValue::Bool(value), TypeInfo::Bool))
             }
             Expression::Identifier(name) => {
-                if let Some(&var_ptr) = self.get_variable(&name) {
-                    let loaded = self
-                        .builder
-                        .build_load(var_ptr, &name)
-                        .map_err(|e| e.to_string())?;
-                    // Determine type based on the loaded value type
-                    if loaded.is_int_value() {
-                        Ok(TypedValue::Int(loaded.into_int_value()))
-                    } else if loaded.is_float_value() {
-                        Ok(TypedValue::Float(loaded.into_float_value()))
-                    } else {
-                        Ok(TypedValue::Bool(loaded.into_int_value()))
-                    }
+                let actual_name = if name.starts_with('$') {
+                    &name[1..]
                 } else {
-                    Err(format!("Undefined variable: {}", name))
-                }
+                    &name
+                };
+
+                let &(ptr, var_ty) = self
+                    .get_variable(actual_name)
+                    .ok_or(format!("Unknown variable: {}", actual_name))?;
+
+                let loaded = match var_ty {
+                    TypeInfo::Int => {
+                        let val =
+                            self.builder
+                                .build_load(self.context.i32_type(), ptr, actual_name);
+                        TypedValue::Int(val)
+                    }
+                    TypeInfo::Float => {
+                        let val =
+                            self.builder
+                                .build_load(self.context.f64_type(), ptr, actual_name);
+                        TypedValue::Float(val)
+                    }
+                    TypeInfo::Bool => {
+                        let val =
+                            self.builder
+                                .build_load(self.context.bool_type(), ptr, actual_name);
+                        TypedValue::Bool(val)
+                    }
+                };
+
+                Ok((loaded, var_ty));
             }
+
             Expression::Infix(left, op, right) => {
                 // recursively compile left and right side
-                let lhs = self.compile_expression(*left)?;
-                let rhs = self.compile_expression(*right)?;
+                let (lhs, _) = self.compile_expression(*left)?;
+                let (rhs, _) = self.compile_expression(*right)?;
 
-                // Dispatch table using match - Match for type and operation
+                // dispatch table using match - Match for type and operation
+                // let the old method handle types for now
+                // TODO: update dispatcher for with TypeInfo
                 match op {
                     Token::Plus => self.build_add(lhs, rhs),
                     Token::Minus => self.build_sub(lhs, rhs),
