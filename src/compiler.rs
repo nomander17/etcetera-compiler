@@ -601,27 +601,172 @@ impl<'ctx> Compiler<'ctx> {
 
     fn compile_if_statement(
         &mut self,
-        _condition: Expression,
-        _consequence: Vec<Statement>,
-        _alternative: Option<Vec<Statement>>,
+        condition: Expression,
+        consequence: Vec<Statement>,
+        alternative: Option<Vec<Statement>>,
     ) -> Result<(), String> {
-        // TODO: Implement if statement
+        let (cond, ty) = self.compile_expression(condition)?;
+        let condition: IntValue = match (ty, cond) {
+            (TypeInfo::Int, TypedValue::Int(val)) => val,
+            (TypeInfo::Float, TypedValue::Float(val)) => {
+                let zero = self.context.f64_type().const_float(0.0);
+                let cmp = self.builder.build_float_compare(
+                    inkwell::FloatPredicate::ONE,
+                    val,
+                    zero,
+                    "float_cond",
+                );
+                cmp
+            }
+            (TypeInfo::Bool, TypedValue::Bool(val)) => val,
+        };
+
+        // get current function
+        let function = self
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
+        let then_block = self.context.append_basic_block(function, "then");
+        let else_block = self.context.append_basic_block(function, "else");
+        let merge_block = self.context.append_basic_block(function, "ifcont"); // where it will return to
+
+        // the main if then else
+        self.builder
+            .build_conditional_branch(condition, then_block, else_block)
+            .map_err(|e| e.to_string())?;
+
+        // generate code for then block
+        self.builder.position_at_end(then_block);
+        self.new_scope();
+        for statement in consequence {
+            self.compile_statement(statement)?;
+        }
+        self.end_scope();
+        // jump back
+        self.builder
+            .build_unconditional_branch(merge_block)
+            .map_err(|e| e.to_string())?;
+
+        // generate code for else, if it exists
+        self.builder.position_at_end(else_block);
+        if let Some(alt) = alternative {
+            self.new_scope();
+            for statement in alt {
+                self.compile_statement(statement)?;
+            }
+            self.end_scope();
+        }
+        // jump back and continue from there
+        self.builder
+            .build_unconditional_branch(merge_block)
+            .map_err(|e| e.to_string())?;
+        self.builder.position_at_end(merge_block);
+
         Ok(())
     }
 
     fn compile_loop_statement(
         &mut self,
-        _var_name: String,
-        _start: Expression,
-        _end: Expression,
-        _body: Vec<Statement>,
+        var_name: String,
+        start: Expression,
+        end: Expression,
+        body: Vec<Statement>,
     ) -> Result<(), String> {
-        // TODO: Implement loop statement
+        let function = self
+            .builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
+
+        // loop var should only be int by design
+        let alloca = self.create_alloca_for_type(TypeInfo::Int, &var_name);
+
+        let (start_val, start_ty) = self.compile_expression(start)?;
+        if start_ty != TypeInfo::Int {
+            return Err(format!(
+                "Loop variable must be an integer but got type {:?} instead.",
+                start_ty
+            ));
+        }
+        let (end_val, end_ty) = self.compile_expression(end)?;
+        if end_ty != TypeInfo::Int {
+            return Err(format!(
+                "Loop variable must be an integer but got type {:?} instead.",
+                end_ty
+            ));
+        }
+
+        let start_val: IntValue = match start_val {
+            TypedValue::Int(val) => val,
+            _ => {
+                return Err("Internal compiler error.".to_string());
+            }
+        };
+        let end_val: IntValue = match end_val {
+            TypedValue::Int(val) => val,
+            _ => {
+                return Err("Internal compiler error.".to_string());
+            }
+        };
+
+        // init loop var
+        self.builder
+            .build_store(alloca, start_val)
+            .map_err(|e| e.to_string())?;
+        // create loop block and jump to it
+        let loop_block = self.context.append_basic_block(function, "loop");
+        self.builder
+            .build_unconditional_branch(loop_block)
+            .map_err(|e| e.to_string());
+        self.builder.position_at_end(loop_block);
+
+        // loop scope
+        self.new_scope();
+        self.insert_variable(var_name.clone(), alloca, TypeInfo::Int);
+
+        for statement in body {
+            self.compile_statement(statement)?;
+        }
+        self.end_scope();
+
+        // compute next_var and update loop var
+        let i32_type = self.context.i32_type();
+        let curr_val = self
+            .builder
+            .build_load(i32_type, alloca, &var_name)
+            .map_err(|e| e.to_string())?
+            .into_int_value();
+        let next_val = self
+            .builder
+            .build_int_add(curr_val, i32_type.const_int(1, false), "nextvar")
+            .map_err(|e| e.to_string())?;
+        self.builder
+            .build_store(alloca, next_val)
+            .map_err(|e| e.to_string())?;
+
+        // condtional branch with the loop condition curr_val <= end
+        // loop are INCLUSIVE of end_val so 1 to 3  = 1, 2, 3
+        let loop_cond = self.builder.build_int_compare(
+            inkwell::IntPredicate::SLE,
+            curr_val,
+            end_val,
+            "loopcond",
+        )?;
+        let after_block = self.context.append_basic_block(function, "afterloop");
+        self.builder
+            .build_conditional_branch(loop_cond, loop_block, after_block)
+            .map_err(|e| e.to_string())?;
+
+        // return to original position
+        self.builder.position_at_end(after_block);
         Ok(())
     }
 }
 
-// Optional: Implement From traits for cleaner conversion
+// Implement From traits for cleaner conversion
 impl<'ctx> From<IntValue<'ctx>> for TypedValue<'ctx> {
     fn from(value: IntValue<'ctx>) -> Self {
         TypedValue::Int(value)
