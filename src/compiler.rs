@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 
-use inkwell::basic_block;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{FloatValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue};
 
 use crate::{
     ast::{Expression, Program, Statement},
     token::Token,
 };
 
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum TypeInfo {
     Int,
     Float,
@@ -74,7 +74,7 @@ impl<'ctx> Compiler<'ctx> {
 
     fn insert_variable(&mut self, name: String, value: PointerValue<'ctx>, ty: TypeInfo) {
         if let Some(scope) = self.variables.last_mut() {
-            scope.insert(name, (value, ty))
+            let _ = scope.insert(name, (value, ty));
         };
     }
 
@@ -166,10 +166,10 @@ impl<'ctx> Compiler<'ctx> {
         value: &TypedValue<'ctx>,
         ptr: PointerValue<'ctx>,
     ) -> Result<(), String> {
-        let basic_value = match value {
-            TypedValue::Int(v) => (*v).into(),
-            TypedValue::Float(v) => (*v).into(),
-            TypedValue::Bool(v) => (*v).into(),
+        let basic_value: BasicValueEnum = match value {
+            TypedValue::Int(v) => BasicValueEnum::IntValue(*v),
+            TypedValue::Float(v) => BasicValueEnum::FloatValue(*v),
+            TypedValue::Bool(v) => BasicValueEnum::IntValue(*v),
         };
         self.builder
             .build_store(ptr, basic_value)
@@ -211,7 +211,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -219,14 +219,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_add(l, r, "sum")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Int(sum))
+                Ok((TypedValue::Int(sum), TypeInfo::Int))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let sum = self
                     .builder
                     .build_float_add(l, r, "sum")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Float(sum))
+                Ok((TypedValue::Float(sum), TypeInfo::Float))
             }
             _ => Err("Invalid operands for '+'".into()),
         }
@@ -236,7 +236,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -244,14 +244,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_sub(l, r, "diff")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Int(diff))
+                Ok((TypedValue::Int(diff), TypeInfo::Int))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let diff = self
                     .builder
                     .build_float_sub(l, r, "diff")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Float(diff))
+                Ok((TypedValue::Float(diff), TypeInfo::Float))
             }
             _ => Err("Invalid operands for '-'".into()),
         }
@@ -261,7 +261,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -269,14 +269,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_mul(l, r, "prod")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Int(prod))
+                Ok((TypedValue::Int(prod), TypeInfo::Int))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let prod = self
                     .builder
                     .build_float_mul(l, r, "prod")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Float(prod))
+                Ok((TypedValue::Float(prod), TypeInfo::Float))
             }
             _ => Err("Invalid operands for '*'".into()),
         }
@@ -286,7 +286,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -303,14 +303,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_float_div(l_float, r_float, "quot")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Float(quot))
+                Ok((TypedValue::Float(quot), TypeInfo::Float))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let quot = self
                     .builder
                     .build_float_div(l, r, "quot")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Float(quot))
+                Ok((TypedValue::Float(quot), TypeInfo::Float))
             }
             _ => Err("Division not supported for given operands".into()),
         }
@@ -320,7 +320,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
                 // floor division is truncation for now
@@ -328,7 +328,7 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_signed_div(l, r, "floor_div")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Int(quot))
+                Ok((TypedValue::Int(quot), TypeInfo::Int))
             }
             _ => Err("Floor division only supported for integers".into()),
         }
@@ -338,14 +338,14 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
                 let rem = self
                     .builder
                     .build_int_signed_rem(l, r, "rem")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Int(rem))
+                Ok((TypedValue::Int(rem), TypeInfo::Int))
             }
             _ => Err("Modulo only supported for integers".into()),
         }
@@ -355,7 +355,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -363,14 +363,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_compare(inkwell::IntPredicate::SGT, l, r, "gt_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let cmp = self
                     .builder
                     .build_float_compare(inkwell::FloatPredicate::OGT, l, r, "gt_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             _ => Err("Invalid operands for '>'".into()),
         }
@@ -380,7 +380,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -388,14 +388,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_compare(inkwell::IntPredicate::SGE, l, r, "gte_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let cmp = self
                     .builder
                     .build_float_compare(inkwell::FloatPredicate::OGE, l, r, "gte_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             _ => Err("Invalid operands for '>='".into()),
         }
@@ -405,7 +405,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -413,14 +413,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_compare(inkwell::IntPredicate::SLT, l, r, "lt_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let cmp = self
                     .builder
                     .build_float_compare(inkwell::FloatPredicate::OLT, l, r, "lt_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             _ => Err("Invalid operands for '<'".into()),
         }
@@ -430,7 +430,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -438,14 +438,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_compare(inkwell::IntPredicate::SLE, l, r, "lte_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let cmp = self
                     .builder
                     .build_float_compare(inkwell::FloatPredicate::OLE, l, r, "lte_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             _ => Err("Invalid operands for '<='".into()),
         }
@@ -455,7 +455,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
             (TypedValue::Int(l), TypedValue::Int(r)) => {
@@ -463,14 +463,14 @@ impl<'ctx> Compiler<'ctx> {
                     .builder
                     .build_int_compare(inkwell::IntPredicate::EQ, l, r, "eq_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             (TypedValue::Float(l), TypedValue::Float(r)) => {
                 let cmp = self
                     .builder
                     .build_float_compare(inkwell::FloatPredicate::OEQ, l, r, "eq_cmp")
                     .map_err(|e| e.to_string())?;
-                Ok(TypedValue::Bool(cmp))
+                Ok((TypedValue::Bool(cmp), TypeInfo::Bool))
             }
             _ => Err("Invalid operands for '=='".into()),
         }
@@ -480,28 +480,28 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let lhs_bool = self.convert_to_bool(lhs)?;
         let rhs_bool = self.convert_to_bool(rhs)?;
         let result = self
             .builder
             .build_and(lhs_bool, rhs_bool, "and")
             .map_err(|e| e.to_string())?;
-        Ok(TypedValue::Bool(result))
+        Ok((TypedValue::Bool(result), TypeInfo::Bool))
     }
 
     fn build_or(
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
-    ) -> Result<TypedValue<'ctx>, String> {
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
         let lhs_bool = self.convert_to_bool(lhs)?;
         let rhs_bool = self.convert_to_bool(rhs)?;
         let result = self
             .builder
             .build_or(lhs_bool, rhs_bool, "or")
             .map_err(|e| e.to_string())?;
-        Ok(TypedValue::Bool(result))
+        Ok((TypedValue::Bool(result), TypeInfo::Bool))
     }
 
     fn convert_to_bool(&self, value: TypedValue<'ctx>) -> Result<IntValue<'ctx>, String> {
@@ -541,7 +541,7 @@ impl<'ctx> Compiler<'ctx> {
                 let value = self.context.bool_type().const_int(val as u64, false);
                 Ok((TypedValue::Bool(value), TypeInfo::Bool))
             }
-            Expression::Identifier(name) => {
+            Expression::Identifer(name) => {
                 let actual_name = if name.starts_with('$') {
                     &name[1..]
                 } else {
@@ -554,26 +554,29 @@ impl<'ctx> Compiler<'ctx> {
 
                 let loaded = match var_ty {
                     TypeInfo::Int => {
-                        let val =
-                            self.builder
-                                .build_load(self.context.i32_type(), ptr, actual_name);
-                        TypedValue::Int(val)
+                        let val = self
+                            .builder
+                            .build_load(self.context.i32_type(), ptr, actual_name)
+                            .map_err(|e| e.to_string())?;
+                        TypedValue::Int(val.into_int_value())
                     }
                     TypeInfo::Float => {
-                        let val =
-                            self.builder
-                                .build_load(self.context.f64_type(), ptr, actual_name);
-                        TypedValue::Float(val)
+                        let val = self
+                            .builder
+                            .build_load(self.context.f64_type(), ptr, actual_name)
+                            .map_err(|e| e.to_string())?;
+                        TypedValue::Float(val.into_float_value())
                     }
                     TypeInfo::Bool => {
-                        let val =
-                            self.builder
-                                .build_load(self.context.bool_type(), ptr, actual_name);
-                        TypedValue::Bool(val)
+                        let val = self
+                            .builder
+                            .build_load(self.context.bool_type(), ptr, actual_name)
+                            .map_err(|e| e.to_string())?;
+                        TypedValue::Bool(val.into_int_value())
                     }
                 };
 
-                Ok((loaded, var_ty));
+                Ok((loaded, var_ty))
             }
 
             Expression::Infix(left, op, right) => {
@@ -630,6 +633,9 @@ impl<'ctx> Compiler<'ctx> {
             (TypeInfo::Int, TypedValue::Int(val)) => ("%d\n", val.into()),
             (TypeInfo::Float, TypedValue::Float(val)) => ("%f\n", val.into()),
             (TypeInfo::Bool, TypedValue::Bool(val)) => ("%d\n", val.into()),
+            _ => unreachable!(
+                "Type and value type mismatch in print statement. How did we get here?"
+            ),
         };
 
         let format_str = self
@@ -639,7 +645,11 @@ impl<'ctx> Compiler<'ctx> {
         let format_str_ptr = format_str.as_pointer_value();
         // call printf with formatted string
         self.builder
-            .build_call(printf, &[format_str_ptr.into(), val.into()], "printf_call")
+            .build_call(
+                printf,
+                &[format_str_ptr.into(), value.into()],
+                "printf_call",
+            )
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -655,15 +665,14 @@ impl<'ctx> Compiler<'ctx> {
             (TypeInfo::Int, TypedValue::Int(val)) => val,
             (TypeInfo::Float, TypedValue::Float(val)) => {
                 let zero = self.context.f64_type().const_float(0.0);
-                let cmp = self.builder.build_float_compare(
-                    inkwell::FloatPredicate::ONE,
-                    val,
-                    zero,
-                    "float_cond",
-                );
+                let cmp = self
+                    .builder
+                    .build_float_compare(inkwell::FloatPredicate::ONE, val, zero, "float_cond")
+                    .map_err(|e| e.to_string())?;
                 cmp
             }
             (TypeInfo::Bool, TypedValue::Bool(val)) => val,
+            _ => unreachable!("Type and value type mismatch in if statement! How did we get here?"),
         };
 
         // get current function
@@ -727,7 +736,7 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap();
 
         // loop var should only be int by design
-        let alloca = self.create_alloca_for_type(TypeInfo::Int, &var_name);
+        let alloca = self.create_alloca_for_type(TypeInfo::Int, &var_name)?;
 
         let (start_val, start_ty) = self.compile_expression(start)?;
         if start_ty != TypeInfo::Int {
@@ -794,12 +803,10 @@ impl<'ctx> Compiler<'ctx> {
 
         // condtional branch with the loop condition curr_val <= end
         // loop are INCLUSIVE of end_val so 1 to 3  = 1, 2, 3
-        let loop_cond = self.builder.build_int_compare(
-            inkwell::IntPredicate::SLE,
-            curr_val,
-            end_val,
-            "loopcond",
-        )?;
+        let loop_cond = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::SLE, curr_val, end_val, "loopcond")
+            .map_err(|e| e.to_string())?;
         let after_block = self.context.append_basic_block(function, "afterloop");
         self.builder
             .build_conditional_branch(loop_cond, loop_block, after_block)
