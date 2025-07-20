@@ -17,6 +17,18 @@ enum TypeInfo {
     Bool,
 }
 
+impl<'ctx> From<IntValue<'ctx>> for TypedValue<'ctx> {
+    fn from(value: IntValue<'ctx>) -> Self {
+        TypedValue::Int(value)
+    }
+}
+
+impl<'ctx> From<FloatValue<'ctx>> for TypedValue<'ctx> {
+    fn from(value: FloatValue<'ctx>) -> Self {
+        TypedValue::Float(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum TypedValue<'ctx> {
     Int(IntValue<'ctx>),
@@ -129,7 +141,7 @@ impl<'ctx> Compiler<'ctx> {
             self.store_typed_value(&value, var_ptr)?;
         } else {
             // variable doesn't exist, create new one
-            let alloca = self.create_alloca_for_type(ty, &name);
+            let alloca = self.create_alloca_for_type(ty, &name)?;
             self.store_typed_value(&value, alloca)?;
             self.insert_variable(name, alloca, ty);
         }
@@ -593,9 +605,42 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    // Placeholder methods for missing Statement handlers
-    fn compile_print_statement(&mut self, _expr: Expression) -> Result<(), String> {
-        // TODO: Implement print statement
+    fn get_printf(&self) -> inkwell::values::FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("printf") {
+            return function;
+        }
+
+        // declare printf for linker
+        let i32_type = self.context.i32_type();
+        let str_type = self.context.ptr_type(inkwell::AddressSpace::from(0));
+        // printf returns an i32, C-style
+        let printf_type = i32_type.fn_type(&[str_type.into()], true);
+        self.module.add_function(
+            "printf",
+            printf_type,
+            Some(inkwell::module::Linkage::External),
+        )
+    }
+
+    fn compile_print_statement(&mut self, expr: Expression) -> Result<(), String> {
+        let (val, ty) = self.compile_expression(expr)?;
+        let printf = self.get_printf();
+
+        let (format_str, value): (&str, inkwell::values::BasicValueEnum) = match (ty, val) {
+            (TypeInfo::Int, TypedValue::Int(val)) => ("%d\n", val.into()),
+            (TypeInfo::Float, TypedValue::Float(val)) => ("%f\n", val.into()),
+            (TypeInfo::Bool, TypedValue::Bool(val)) => ("%d\n", val.into()),
+        };
+
+        let format_str = self
+            .builder
+            .build_global_string_ptr(format_str, "format_str")
+            .map_err(|e| e.to_string())?;
+        let format_str_ptr = format_str.as_pointer_value();
+        // call printf with formatted string
+        self.builder
+            .build_call(printf, &[format_str_ptr.into(), val.into()], "printf_call")
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -763,18 +808,5 @@ impl<'ctx> Compiler<'ctx> {
         // return to original position
         self.builder.position_at_end(after_block);
         Ok(())
-    }
-}
-
-// Implement From traits for cleaner conversion
-impl<'ctx> From<IntValue<'ctx>> for TypedValue<'ctx> {
-    fn from(value: IntValue<'ctx>) -> Self {
-        TypedValue::Int(value)
-    }
-}
-
-impl<'ctx> From<FloatValue<'ctx>> for TypedValue<'ctx> {
-    fn from(value: FloatValue<'ctx>) -> Self {
-        TypedValue::Float(value)
     }
 }
