@@ -774,7 +774,7 @@ impl<'ctx> Compiler<'ctx> {
         let loop_block = self.context.append_basic_block(function, "loop");
         self.builder
             .build_unconditional_branch(loop_block)
-            .map_err(|e| e.to_string());
+            .map_err(|e| e.to_string())?;
         self.builder.position_at_end(loop_block);
 
         // loop scope
