@@ -46,7 +46,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "etcetera"
+name = "etcetera-compiler"
 version = "0.1.0"
 dependencies = [
  "inkwell",
