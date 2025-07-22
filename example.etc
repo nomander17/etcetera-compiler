@@ -1,16 +1,29 @@
-! This is an example program.
+! Single line comment
+!! Multiline comment
+   like this !!
 
-a: int = 10
-b: int = 20
+! Variables can be initialised with a type
+a: int = 5
+! Or auto inferred based on expression
+b = 10.5
 
-! If statement
-if $a > $b then
-  print $a
+! Re-assignment also possible
+b = 1.5
+
+! Use variables in expressions with $
+sum = $a + $b
+! Print doesn't require $
+print sum
+
+!! Newlines and tabs are completely optional
+but may be used for style !!
+if a > b then
+    print $a
 else
-  print $b
+    print $b
 end if
 
-! Loop statement
-loop from 0 to 5 in i
-  print $i
+! Loops are inclusive and auto-initialise the loop variable
+loop from 1 to 5 in i
+    print $i
 end loop

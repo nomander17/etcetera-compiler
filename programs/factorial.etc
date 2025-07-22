@@ -1,0 +1,11 @@
+! Factorial of 5
+
+n: int = 5
+result: int = 1
+i: int = 1
+
+loop from $i to $n in i
+    result = $result * $i
+end loop
+
+print $result

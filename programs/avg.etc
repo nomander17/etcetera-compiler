@@ -1,0 +1,10 @@
+! Average of 3 numbers
+a = 3.0
+b = 7.0
+c = 10.0
+
+! no parenthesis support yet so we break it into steps
+total = $a + $b + $c
+avg = $total / 3
+
+print avg

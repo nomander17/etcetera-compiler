@@ -1,0 +1,13 @@
+!! Fibonacci
+with a multi line comment woo~~ !!
+a = 0
+b = 1
+
+print a
+
+loop from 1 to 10 in i
+    sum = $a + $b
+    a = b
+    b = sum
+    print a
+end loop
