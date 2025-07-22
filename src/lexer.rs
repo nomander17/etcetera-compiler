@@ -152,7 +152,7 @@ impl<'a> Lexer<'a> {
                 self.read_char();
             }
         } else {
-            while self.ch != b'!' && self.ch != 0 {
+            while self.ch != b'\n' && self.ch != 0 {
                 self.read_char();
             }
         }

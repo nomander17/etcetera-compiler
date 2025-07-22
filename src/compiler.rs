@@ -805,7 +805,7 @@ impl<'ctx> Compiler<'ctx> {
         // loop are INCLUSIVE of end_val so 1 to 3  = 1, 2, 3
         let loop_cond = self
             .builder
-            .build_int_compare(inkwell::IntPredicate::SLE, curr_val, end_val, "loopcond")
+            .build_int_compare(inkwell::IntPredicate::SLT, curr_val, end_val, "loopcond")
             .map_err(|e| e.to_string())?;
         let after_block = self.context.append_basic_block(function, "afterloop");
         self.builder
