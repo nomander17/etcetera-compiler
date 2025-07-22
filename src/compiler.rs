@@ -131,16 +131,17 @@ impl<'ctx> Compiler<'ctx> {
 
         if let Some(&(var_ptr, var_ty)) = self.get_variable(&name) {
             // variable exists, update it
-            // TODO promote type
+            // promote type
             if var_ty != ty {
-                return Err(format!(
-                    "Type mismtach on assignment to '{}': {:?} vs {:?}",
-                    name, var_ty, ty
-                ));
+                let alloc = self.create_alloca_for_type(ty, &name)?;
+                self.store_typed_value(&value, alloc)?;
+                self.insert_variable(name, alloc, ty);
+                return Ok(());
             }
             self.store_typed_value(&value, var_ptr)?;
         } else {
             // variable doesn't exist, create new one
+            // auto infer type from expression (loosely typed)
             let alloca = self.create_alloca_for_type(ty, &name)?;
             self.store_typed_value(&value, alloca)?;
             self.insert_variable(name, alloca, ty);

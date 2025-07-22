@@ -56,6 +56,7 @@ impl<'a> Parser<'a> {
         match self.current_token {
             Token::Identifier(_) => {
                 // identifier can be a let or assign
+                // assignment is when the variable already exists
                 if self.peek_token == Token::Assign {
                     self.parse_assignment_statement()
                 } else {
@@ -70,24 +71,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_assignment_statement(&mut self) -> Option<Statement> {
-        // Our assignment statements look like:
-        // variable: type = value
-        // check for each step and exit when the syntax is wrong
         let ident = if let Token::Identifier(name) = self.current_token.clone() {
             name
         } else {
             return None;
         };
-
-        if !self.expect_peek(Token::Colon) {
-            return None;
-        }
-        self.next_token();
-
-        if !self.peek_token_is_type() {
-            return None;
-        }
-        self.next_token();
 
         if !self.expect_peek(Token::Assign) {
             return None;
@@ -100,9 +88,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_let_statement(&mut self) -> Option<Statement> {
-        // For variable definitation we use let
-        // let statements look like:
-        // let ident: type = value
+        // Our variable initialisation statements look like:
+        // variable: type = value
+        // check for each step and exit when the syntax is wrong
         let ident = if let Token::Identifier(name) = self.current_token.clone() {
             name
         } else {
