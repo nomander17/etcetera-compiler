@@ -1,6 +1,7 @@
-use std::{env, fs, path::Path};
+use std::{env, fs, io::Write, path::Path, process::Command};
 
 use inkwell::context::Context;
+use tempfile::NamedTempFile;
 
 use crate::{compiler::Compiler, lexer::Lexer, parser::Parser};
 
@@ -17,7 +18,7 @@ fn main() {
         return;
     }
     let file_path = Path::new(&args[1]);
-    let _should_run = args.len() > 2 && (args[2] == "-r" || args[2] == "--run");
+    let should_run = args.len() > 2 && (args[2] == "-r" || args[2] == "--run");
 
     let input = fs::read_to_string(file_path).expect("Error reading file");
 
@@ -26,9 +27,56 @@ fn main() {
     let program = parser.parse_program();
     let context = Context::create();
     let mut compiler = Compiler::new(&context);
-    let llvm_ir = compiler.compile(program).expect("Compilation failed");
 
-    // Write IR to a file
-    let _executable_name = file_path.file_stem().unwrap().to_str().unwrap();
-    fs::write("output.ll", llvm_ir).expect("Error writing LLVM IR to file.");
+    match compiler.compile(program) {
+        Ok(llvm_ir) => {
+            let mut ll_file = NamedTempFile::new().expect("Failed to create temp file.");
+            ll_file
+                .write_all(llvm_ir.as_bytes())
+                .expect("Failed to write to temp LLVM IR file.");
+
+            let obj_file = NamedTempFile::new().expect("Failed to create temp file.");
+            let obj_path = obj_file.path();
+
+            let llc_status = Command::new("llc")
+                .arg("-filetype=obj")
+                .arg("-relocation-model=pic")
+                .arg(ll_file.path())
+                .arg("-o")
+                .arg(obj_path)
+                .status()
+                .expect("Failed to execute llc");
+
+            if !llc_status.success() {
+                eprintln!("llc failed!");
+                return;
+            }
+
+            let executable_name = file_path.file_stem().unwrap().to_str().unwrap();
+
+            let clang_status = Command::new("clang")
+                .arg(obj_path)
+                .arg("-o")
+                .arg(executable_name)
+                .status()
+                .expect("Failed to execute clang");
+
+            if !clang_status.success() {
+                eprintln!("clang failed!");
+                return;
+            }
+
+            if should_run {
+                let run_status = Command::new(format!("./{}", executable_name))
+                    .status()
+                    .expect("Failed to run exectuable!");
+
+                if !run_status.success() {
+                    eprintln!("Executable failed!");
+                    return;
+                }
+            }
+        }
+        Err(e) => eprintln!("Error: {}", e),
+    }
 }
