@@ -1,6 +1,6 @@
 [package]
 name = "etcetera-compiler"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A Rust-based compiler project."
 license = "GPL-3.0-only"
@@ -9,6 +9,10 @@ readme = "README.md"
 keywords = ["compiler", "llvm", "inkwell"]
 categories = ["compilers", "development-tools"]
 authors = ["Md Noman Khan <nomander17@gmail.com"]
+
+[[bin]]
+name = "etc"
+path = "src/main.rs"
 
 [dependencies]
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }

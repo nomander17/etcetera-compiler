@@ -7,9 +7,16 @@ This project depends on the following external tools:
 - [`clang`](https://clang.llvm.org/) — a C language family frontend for LLVM
 
 ## Run
+#### Build yourself and run
 ```bash
 cargo run -- example.etc --run
 ```
+
+#### Or get it from Cargo
+```bash
+cargo install etcetera-compiler
+```
+Then use using the `etc` command.
 
 ## Features
 - **Ahead-of-Time (AOT) Compilation:** Code is fully compiled and optimized before execution, not interpreted on the fly. The compiler toolchain (`llc`, `clang`) assembles a standalone binary.
