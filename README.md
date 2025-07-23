@@ -21,8 +21,9 @@ Then use using the `etc` command.
 ## Features
 - **Ahead-of-Time (AOT) Compilation:** Code is fully compiled and optimized before execution, not interpreted on the fly. The compiler toolchain (`llc`, `clang`) assembles a standalone binary.
 - **Variable Declaration:** Loosely typed with optional type anotation (`my_var: int = 5`).
-- **Data Types:** `int`, `float`, `char`, `string`, `bool` (Currently only numerical operations are supported).
+- **Data Types:** `int`, `float`, `char`, `string`, `bool` 
 - **Automatic Type Coersion**: Allows for arithmetic operations on mixed (compatible) data types like `int` and `float`.
+- **Safe String operations**: Supports memory safe string concatenation. 
 - **Rich set of operators:**
     - Arithmetic: `+`, `-`, `*`, `/`, `//` (floor division), `%` (modulo).
     - Comparison: `==`, `!=`, `>`, `>=`, `<`, `<=`.
