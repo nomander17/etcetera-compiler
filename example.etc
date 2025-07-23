@@ -13,14 +13,15 @@ b = 1.5
 ! Use variables in expressions with $
 sum = $a + $b
 ! Print doesn't require $
-print sum
+! Use + for string concat
+print "Sum: " + sum
 
 !! Newlines and tabs are completely optional
 but may be used for style !!
 if a > b then
-    print $a
+    print a + " is bigger than " + b
 else
-    print $b
+    print b + " is bigger than " + a
 end if
 
 ! Loops are inclusive and auto-initialise the loop variable
