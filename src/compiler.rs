@@ -216,28 +216,215 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    fn convert_value_to_string(
+        &self,
+        value: TypedValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>, String> {
+        let sprintf = self.get_sprintf();
+        let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+
+        match value {
+            TypedValue::String(s) => Ok(s),
+            TypedValue::Int(i) => {
+                let buffer = self
+                    .builder
+                    .build_alloca(self.context.i8_type().array_type(12), "int_str_buffer")
+                    .map_err(|e| e.to_string())?; // 11 for i32_min + null
+                let buffer_ptr = self
+                    .builder
+                    .build_pointer_cast(buffer, i8_ptr_type, "tmp")
+                    .map_err(|e| e.to_string())?;
+                let format_str = self
+                    .builder
+                    .build_global_string_ptr("%d", "int_format_str")
+                    .map_err(|e| e.to_string())?;
+
+                self.builder
+                    .build_call(
+                        sprintf,
+                        &[
+                            buffer_ptr.into(),
+                            format_str.as_pointer_value().into(),
+                            i.into(),
+                        ],
+                        "sprintf_int",
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(buffer_ptr)
+            }
+            TypedValue::Float(f) => {
+                let buffer = self
+                    .builder
+                    .build_alloca(self.context.i8_type().array_type(30), "float_str_buffer")
+                    .map_err(|e| e.to_string())?;
+                let buffer_ptr = self
+                    .builder
+                    .build_pointer_cast(buffer, i8_ptr_type, "tmp")
+                    .map_err(|e| e.to_string())?;
+                let format_str = self
+                    .builder
+                    .build_global_string_ptr("%f", "float_format_str")
+                    .map_err(|e| e.to_string())?;
+
+                self.builder
+                    .build_call(
+                        sprintf,
+                        &[
+                            buffer_ptr.into(),
+                            format_str.as_pointer_value().into(),
+                            f.into(),
+                        ],
+                        "sprintf_float",
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(buffer_ptr)
+            }
+            TypedValue::Bool(b) => {
+                let buffer = self
+                    .builder
+                    .build_alloca(self.context.i8_type().array_type(2), "bool_str_buffer")
+                    .map_err(|e| e.to_string())?;
+                let buffer_ptr = self
+                    .builder
+                    .build_pointer_cast(buffer, i8_ptr_type, "tmp")
+                    .map_err(|e| e.to_string())?;
+                let format_str = self
+                    .builder
+                    .build_global_string_ptr("%d", "bool_format_str")
+                    .map_err(|e| e.to_string())?;
+
+                let b_i32 = self
+                    .builder
+                    .build_int_z_extend(b, self.context.i32_type(), "bool_as_i32")
+                    .map_err(|e| e.to_string())?;
+
+                self.builder
+                    .build_call(
+                        sprintf,
+                        &[
+                            buffer_ptr.into(),
+                            format_str.as_pointer_value().into(),
+                            b_i32.into(),
+                        ],
+                        "sprintf_bool",
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(buffer_ptr)
+            }
+        }
+    }
+
+    fn build_string_concat(
+        &self,
+        lhs: PointerValue<'ctx>,
+        rhs: PointerValue<'ctx>,
+    ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
+        let strlen = self.get_strlen();
+        let malloc = self.get_malloc();
+        let sprintf = self.get_sprintf();
+
+        // get length of lhs string
+        let lhs_len_call = self
+            .builder
+            .build_call(strlen, &[lhs.into()], "lhs_len")
+            .map_err(|e| e.to_string())?;
+        let lhs_len = lhs_len_call
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+
+        // get length of rhs string
+        let rhs_len_call = self
+            .builder
+            .build_call(strlen, &[rhs.into()], "rhs_len")
+            .map_err(|e| e.to_string())?;
+        let rhs_len = rhs_len_call
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+
+        // total_len = lhs_len + rhs_len
+        let total_len = self
+            .builder
+            .build_int_add(lhs_len, rhs_len, "total_len")
+            .map_err(|e| e.to_string())?;
+
+        // add 1 for null terminator
+        let buffer_size = self
+            .builder
+            .build_int_add(
+                total_len,
+                self.context.i64_type().const_int(1, false),
+                "buffer_size",
+            )
+            .map_err(|e| e.to_string())?;
+
+        // malloc(buffer_size)
+        let malloc_call = self
+            .builder
+            .build_call(malloc, &[buffer_size.into()], "malloc_call")
+            .map_err(|e| e.to_string())?;
+        let buffer_ptr = malloc_call
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+
+        // sprintf(buffer, "%s%s", lhs, rhs)
+        let format_str = self
+            .builder
+            .build_global_string_ptr("%s%s", "concat_format_str")
+            .map_err(|e| e.to_string())?;
+
+        self.builder
+            .build_call(
+                sprintf,
+                &[
+                    buffer_ptr.into(),
+                    format_str.as_pointer_value().into(),
+                    lhs.into(),
+                    rhs.into(),
+                ],
+                "sprintf_concat",
+            )
+            .map_err(|e| e.to_string())?;
+
+        Ok((TypedValue::String(buffer_ptr), TypeInfo::String))
+    }
+
     fn build_add(
         &self,
         lhs: TypedValue<'ctx>,
         rhs: TypedValue<'ctx>,
     ) -> Result<(TypedValue<'ctx>, TypeInfo), String> {
-        let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
         match (lhs, rhs) {
-            (TypedValue::Int(l), TypedValue::Int(r)) => {
-                let sum = self
-                    .builder
-                    .build_int_add(l, r, "sum")
-                    .map_err(|e| e.to_string())?;
-                Ok((TypedValue::Int(sum), TypeInfo::Int))
+            (TypedValue::String(_), _) | (_, TypedValue::String(_)) => {
+                let lhs_str = self.convert_value_to_string(lhs)?;
+                let rhs_str = self.convert_value_to_string(rhs)?;
+                self.build_string_concat(lhs_str, rhs_str)
             }
-            (TypedValue::Float(l), TypedValue::Float(r)) => {
-                let sum = self
-                    .builder
-                    .build_float_add(l, r, "sum")
-                    .map_err(|e| e.to_string())?;
-                Ok((TypedValue::Float(sum), TypeInfo::Float))
+            _ => {
+                let (lhs, rhs) = self.promote_to_common_type(lhs, rhs)?;
+                match (lhs, rhs) {
+                    (TypedValue::Int(l), TypedValue::Int(r)) => {
+                        let sum = self
+                            .builder
+                            .build_int_add(l, r, "sum")
+                            .map_err(|e| e.to_string())?;
+                        Ok((TypedValue::Int(sum), TypeInfo::Int))
+                    }
+                    (TypedValue::Float(l), TypedValue::Float(r)) => {
+                        let sum = self
+                            .builder
+                            .build_float_add(l, r, "sum")
+                            .map_err(|e| e.to_string())?;
+                        Ok((TypedValue::Float(sum), TypeInfo::Float))
+                    }
+                    _ => Err("Invalid operands for '+'".into()),
+                }
             }
-            _ => Err("Invalid operands for '+'".into()),
         }
     }
 
@@ -652,6 +839,54 @@ impl<'ctx> Compiler<'ctx> {
         self.module.add_function(
             "printf",
             printf_type,
+            Some(inkwell::module::Linkage::External),
+        )
+    }
+
+    fn get_sprintf(&self) -> inkwell::values::FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("sprintf") {
+            return function;
+        }
+
+        let i32_type = self.context.i32_type();
+        let str_type = self.context.ptr_type(inkwell::AddressSpace::from(0));
+        // int sprintf(char *str, const char *format, ...);
+        let sprintf_type = i32_type.fn_type(&[str_type.into(), str_type.into()], true);
+        self.module.add_function(
+            "sprintf",
+            sprintf_type,
+            Some(inkwell::module::Linkage::External),
+        )
+    }
+
+    fn get_strlen(&self) -> inkwell::values::FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("strlen") {
+            return function;
+        }
+
+        let i64_type = self.context.i64_type(); // size_t
+        let str_type = self.context.ptr_type(inkwell::AddressSpace::from(0)); // i8*
+        // size_t strlen(const char *s);
+        let strlen_type = i64_type.fn_type(&[str_type.into()], false);
+        self.module.add_function(
+            "strlen",
+            strlen_type,
+            Some(inkwell::module::Linkage::External),
+        )
+    }
+
+    fn get_malloc(&self) -> inkwell::values::FunctionValue<'ctx> {
+        if let Some(function) = self.module.get_function("malloc") {
+            return function;
+        }
+
+        let i64_type = self.context.i64_type(); // size_t
+        let str_type = self.context.ptr_type(inkwell::AddressSpace::from(0)); // i8*
+        // void *malloc(size_t size);
+        let malloc_type = str_type.fn_type(&[i64_type.into()], false);
+        self.module.add_function(
+            "malloc",
+            malloc_type,
             Some(inkwell::module::Linkage::External),
         )
     }
