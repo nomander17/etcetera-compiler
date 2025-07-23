@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use inkwell::AddressSpace;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -15,6 +16,7 @@ enum TypeInfo {
     Int,
     Float,
     Bool,
+    String,
 }
 
 impl<'ctx> From<IntValue<'ctx>> for TypedValue<'ctx> {
@@ -34,6 +36,7 @@ enum TypedValue<'ctx> {
     Int(IntValue<'ctx>),
     Float(FloatValue<'ctx>),
     Bool(IntValue<'ctx>), // boolean is represented as i1 in LLVM
+    String(PointerValue<'ctx>),
 }
 
 pub struct Compiler<'ctx> {
@@ -158,6 +161,10 @@ impl<'ctx> Compiler<'ctx> {
             TypeInfo::Int => self.builder.build_alloca(self.context.i32_type(), name),
             TypeInfo::Float => self.builder.build_alloca(self.context.f64_type(), name),
             TypeInfo::Bool => self.builder.build_alloca(self.context.bool_type(), name),
+            // i8* for strings
+            TypeInfo::String => self
+                .builder
+                .build_alloca(self.context.ptr_type(AddressSpace::default()), name),
         };
         alloca.map_err(|e| e.to_string())
     }
@@ -171,6 +178,7 @@ impl<'ctx> Compiler<'ctx> {
             TypedValue::Int(v) => BasicValueEnum::IntValue(*v),
             TypedValue::Float(v) => BasicValueEnum::FloatValue(*v),
             TypedValue::Bool(v) => BasicValueEnum::IntValue(*v),
+            TypedValue::String(v) => BasicValueEnum::PointerValue(*v),
         };
         self.builder
             .build_store(ptr, basic_value)
@@ -522,6 +530,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_float_compare(inkwell::FloatPredicate::ONE, f, zero, "to_bool")
                     .map_err(|e| e.to_string())
             }
+            TypedValue::String(_) => Err(format!("Cannot convert string to bool!")),
         }
     }
 
@@ -541,6 +550,18 @@ impl<'ctx> Compiler<'ctx> {
             Expression::BoolLiteral(val) => {
                 let value = self.context.bool_type().const_int(val as u64, false);
                 Ok((TypedValue::Bool(value), TypeInfo::Bool))
+            }
+            Expression::StringLiteral(val) => {
+                // create a global string in LLVM IR (null-terminated by default)
+                let global = self
+                    .builder
+                    .build_global_string_ptr(&val, "str")
+                    .map_err(|e| e.to_string())?;
+
+                // pointer to the start of the string
+                let ptr = global.as_pointer_value();
+
+                Ok((TypedValue::String(ptr), TypeInfo::String))
             }
             Expression::Identifer(name) => {
                 let actual_name = if name.starts_with('$') {
@@ -575,6 +596,17 @@ impl<'ctx> Compiler<'ctx> {
                             .map_err(|e| e.to_string())?;
                         TypedValue::Bool(val.into_int_value())
                     }
+                    TypeInfo::String => {
+                        let val = self
+                            .builder
+                            .build_load(
+                                self.context.ptr_type(AddressSpace::default()),
+                                ptr,
+                                actual_name,
+                            )
+                            .map_err(|e| e.to_string())?;
+                        TypedValue::String(val.into_pointer_value())
+                    }
                 };
 
                 Ok((loaded, var_ty))
@@ -585,9 +617,7 @@ impl<'ctx> Compiler<'ctx> {
                 let (lhs, _) = self.compile_expression(*left)?;
                 let (rhs, _) = self.compile_expression(*right)?;
 
-                // dispatch table using match - Match for type and operation
-                // let the old method handle types for now
-                // TODO: update dispatcher for with TypeInfo
+                // dispatch table using match - match for operation auto promote type
                 match op {
                     Token::Plus => self.build_add(lhs, rhs),
                     Token::Minus => self.build_sub(lhs, rhs),
@@ -634,6 +664,7 @@ impl<'ctx> Compiler<'ctx> {
             (TypeInfo::Int, TypedValue::Int(val)) => ("%d\n", val.into()),
             (TypeInfo::Float, TypedValue::Float(val)) => ("%f\n", val.into()),
             (TypeInfo::Bool, TypedValue::Bool(val)) => ("%d\n", val.into()),
+            (TypeInfo::String, TypedValue::String(val)) => ("%s\n", val.into()),
             _ => unreachable!(
                 "Type and value type mismatch in print statement. How did we get here?"
             ),
@@ -673,6 +704,14 @@ impl<'ctx> Compiler<'ctx> {
                 cmp
             }
             (TypeInfo::Bool, TypedValue::Bool(val)) => val,
+            (TypeInfo::String, TypedValue::String(val)) => {
+                let null_ptr = self.context.ptr_type(AddressSpace::default()).const_null();
+                let cmp = self
+                    .builder
+                    .build_int_compare(inkwell::IntPredicate::NE, val, null_ptr, "str_cond")
+                    .map_err(|e| e.to_string())?;
+                cmp
+            }
             _ => unreachable!("Type and value type mismatch in if statement! How did we get here?"),
         };
 
